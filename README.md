@@ -13,4 +13,4 @@
 Семантика: Менее одного раза
 
 
-Генератор: SDG (https://github.com/hitsz-ids/synthetic-data-generator)
+Генератор: Cвой (Смотри файл Gen.py)
