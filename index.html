@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sensor Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        .dashboard {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+
+        .message-box {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .sensor-container {
+            margin: 25px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        .chart-pair {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-top: 20px;
+        }
+
+        .chart-wrapper {
+            height: 350px;
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="message-box">
+            <h2>{{ dashboard_title }}</h2>
+            <p>{{ welcome_message }}</p>
+            <div id="status">
+                <p>Active sensors: <span id="sensor-count">0</span></p>
+                <p>Last update: <span id="last-update">-</span></p>
+            </div>
+        </div>
+
+        <div id="sensor-list"></div>
+    </div>
+
+    <script>
+        const socket = io();
+        const charts = new Map();
+        const sensorList = document.getElementById('sensor-list');
+        const lastUpdateSpan = document.getElementById('last-update');
+        const sensorCountSpan = document.getElementById('sensor-count');
+
+        const colors = {
+            red: '#ff6384',
+            green: '#4bc0c0',
+            getColor: function(field) {
+            const lastChar = field.match(/[0-9]$/)?.[0];
+            return lastChar === '1' ? this.red : this.green;
+        }
+        };
+
+        function createHistogram(ctx, labels, data) {
+            return new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: labels.map(label => colors.getColor(label)),
+                        borderColor: labels.map(label => colors.getColor(label)),
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true },
+                        x: {
+                            ticks: {
+                                autoSkip: false,
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateHistogram(histogram, newData) {
+            histogram.data.datasets[0].data = newData;
+            histogram.update();
+        }
+
+        function sortSensorContainers() {
+            const containers = Array.from(sensorList.children);
+            containers.sort((a, b) =>
+                parseInt(a.dataset.sensorId) - parseInt(b.dataset.sensorId));
+            containers.forEach(container => sensorList.appendChild(container));
+        }
+
+        socket.on('sensor_update', function(msg) {
+            lastUpdateSpan.textContent = new Date(msg.timestamp).toLocaleString();
+
+            const sensorId = msg.sensor_id;
+            const data = msg.data;
+
+            if (!charts.has(sensorId)) {
+                const container = document.createElement('div');
+                container.className = 'sensor-container';
+                container.dataset.sensorId = sensorId;
+                container.innerHTML = `
+                    <h3>Sensor ${sensorId}</h3>
+                    <div class="chart-pair">
+                        </div>
+                    <div class="sensor-message">
+                        <h4>Average cars in last 10 seconds on 1 track is ${Math.floor(data.new_green1/5)}. Average cars in last 10 seconds on 2 track is ${Math.floor(data.new_green2/5)}.</h4>
+                    </div>
+                        <div class="chart-wrapper">
+                            <canvas id="count-${sensorId}"></canvas>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="green-${sensorId}"></canvas>
+                        </div>
+                    </div>
+                `;
+
+                sensorList.appendChild(container);
+                sortSensorContainers();
+
+                const countCtx = container.querySelector(`#count-${sensorId}`);
+                const greenCtx = container.querySelector(`#green-${sensorId}`);
+
+                charts.set(sensorId, {
+                    countChart: createHistogram(countCtx,
+                        ['Cars1', 'Cars2'],
+                        [data.count1, data.count2]),
+                    greenChart: createHistogram(greenCtx,
+                        ['Old Time 1', 'Old Time 2', 'New Time 1', 'New Time 2'],
+                        [data.timegreen1, data.timegreen2,
+                         data.new_green1, data.new_green2])
+                });
+
+                sensorCountSpan.textContent = charts.size;
+            } else {
+                const { countChart, greenChart } = charts.get(sensorId);
+                updateHistogram(countChart, [data.count1, data.count2]);
+                updateHistogram(greenChart, [
+                    data.timegreen1,
+                    data.timegreen2,
+                    data.new_green1,
+                    data.new_green2
+                ]);
+                const container = document.querySelector(`[data-sensor-id="${sensorId}"]`);
+                container.querySelector('.sensor-message h4').textContent =
+                    'Average cars on 1 track ${data.new_green1/5} in last 10 seccods. Average cars on 2 track ${data.new_green2/5} in last 10 seccods.';
+            }
+        });
+    </script>
+</body>
+</html>
